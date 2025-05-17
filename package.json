@@ -7,8 +7,8 @@
     "server": "cd backend && npm run dev",
     "client": "cd frontend && npm start",
     "install-all": "npm install && cd backend && npm install && cd ../frontend && npm install",
-    "build": "npm run install-all && cd frontend && npm run build",
-    "vercel-build": "npm run build",
+    "build": "cd frontend && npm install && npm run build",
+    "vercel-build": "cd frontend && npm install && npm run build",
     "postinstall": "npm run install-all"
   },
   "devDependencies": {
