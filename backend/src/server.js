@@ -24,31 +24,46 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// CORS middleware
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  'http://localhost:3000'
-].filter(Boolean); // Remove any undefined values
-
-app.use(cors({
+// CORS middleware - more permissive for development
+const corsOptions = {
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
-  credentials: true
-}));
+    const allowedOrigins = [
+      process.env.FRONTEND_URL,
+      'http://localhost:3000',
+      'https://*.vercel.app'  // Allow all Vercel preview deployments
+    ].filter(Boolean);
 
+    // Check if origin matches any allowed origins
+    const isAllowed = allowedOrigins.some(allowedOrigin => 
+      origin === allowedOrigin || 
+      (allowedOrigin.includes('*') && origin.endsWith(allowedOrigin.split('*')[1]))
+    );
+
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log('Blocked by CORS:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
+  res.status(200).json({ 
+    status: 'ok',
+    environment: process.env.NODE_ENV,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Routes
@@ -94,7 +109,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('Error:', err.stack);
   const statusCode = err.statusCode || 500;
   const message = process.env.NODE_ENV === 'production' 
     ? 'Something went wrong!' 
@@ -107,11 +122,20 @@ app.use((err, req, res, next) => {
   });
 });
 
-// For Vercel serverless functions
+// 404 handler - must be after all other routes
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found',
+    path: req.path
+  });
+});
+
+// Export for Vercel
 module.exports = app;
 
-// For local development
-if (process.env.NODE_ENV === 'production') {
+// Start server only in development
+if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
