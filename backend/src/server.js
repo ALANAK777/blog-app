@@ -12,7 +12,10 @@ dotenv.config();
 const app = express();
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: false, // Disable CSP for development
+  crossOriginEmbedderPolicy: false // Disable COEP for development
+}));
 
 // Rate limiting
 const limiter = rateLimit({
@@ -22,13 +25,31 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // CORS middleware
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'http://localhost:3000'
+].filter(Boolean); // Remove any undefined values
+
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.FRONTEND_URL 
-    : 'http://localhost:3000',
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
   credentials: true
 }));
+
 app.use(express.json());
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 
 // Routes
 app.use('/api/auth', require('./routes/auth.routes'));
@@ -47,12 +68,20 @@ const connectDB = async () => {
     console.log('Connected to MongoDB');
   } catch (err) {
     console.error('MongoDB connection error:', err);
-    // Retry connection after 5 seconds
+    // In production, we want to fail fast
+    if (process.env.NODE_ENV === 'production') {
+      throw err;
+    }
+    // Retry connection after 5 seconds in development
     setTimeout(connectDB, 5000);
   }
 };
 
-connectDB();
+// Connect to MongoDB
+connectDB().catch(err => {
+  console.error('Failed to connect to MongoDB:', err);
+  process.exit(1);
+});
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
@@ -67,20 +96,22 @@ if (process.env.NODE_ENV === 'production') {
 app.use((err, req, res, next) => {
   console.error(err.stack);
   const statusCode = err.statusCode || 500;
+  const message = process.env.NODE_ENV === 'production' 
+    ? 'Something went wrong!' 
+    : err.message;
+  
   res.status(statusCode).json({
     success: false,
-    message: process.env.NODE_ENV === 'production' 
-      ? 'Something went wrong!' 
-      : err.message,
-    error: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    message,
+    ...(process.env.NODE_ENV === 'development' && { error: err.stack })
   });
 });
 
 // For Vercel serverless functions
+module.exports = app;
+
+// For local development
 if (process.env.NODE_ENV === 'production') {
-  module.exports = app;
-} else {
-  // For local development
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
